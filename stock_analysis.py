@@ -1,107 +1,58 @@
 import yfinance as yf
-import pandas as pd
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split, cross_val_score
 
 
-# Function to fetch data and perform analysis on any company
-def analyze_stock(ticker, start_date="2010-01-01", end_date="2023-01-01"):
-    # Fetching data for the given ticker
-    data = yf.download(ticker, start=start_date, end=end_date)
+def calculate_metrics(ticker):
+    stock = yf.Ticker(ticker)
+    financials = stock.financials
+    balance_sheet = stock.balance_sheet
 
-    # Drop rows with missing values
-    data = data.dropna()
+    metrics = {}
 
-    # Calculate 50-day and 200-day moving averages
-    data["50_MA"] = data["Close"].rolling(window=50).mean()
-    data["200_MA"] = data["Close"].rolling(window=200).mean()
+    # Print the available periods to confirm
+    print("Available Periods in Financials DataFrame:")
+    print(financials.columns)
 
-    # Calculate daily returns
-    data["Daily_Return"] = data["Close"].pct_change()
+    try:
+        # Revenue and Net Income Data
+        revenue = financials.loc["Total Revenue"]
+        net_income = financials.loc["Net Income"]
 
-    # Calculate 30-day rolling volatility
-    data["Volatility"] = data["Daily_Return"].rolling(window=30).std()
+        # YoY Revenue Growth (Comparing latest year to the previous year)
+        yoy_revenue_growth = (revenue.iloc[0] - revenue.iloc[1]) / revenue.iloc[1]
+        yoy_net_income_growth = (
+            net_income.iloc[0] - net_income.iloc[1]
+        ) / net_income.iloc[1]
 
-    # Calculate RSI
-    def calculate_rsi(data, window=14):
-        delta = data["Close"].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi
+        metrics["yoy_revenue_growth"] = round(yoy_revenue_growth, 4)
+        metrics["yoy_net_income_growth"] = round(yoy_net_income_growth, 4)
 
-    data["RSI"] = calculate_rsi(data)
+    except Exception as e:
+        metrics["yoy_revenue_growth"] = None
+        metrics["yoy_net_income_growth"] = None
+        print(f"YoY Growth Calculation Error: {e}")
 
-    # Define the target variable 'Success' based on a 5% increase in the next 30 days
-    data["Future_30D_Return"] = data["Close"].shift(-30) / data["Close"] - 1
-    data["Success"] = (data["Future_30D_Return"] > 0.05).astype(int)
+    try:
+        # Calculate ROE using "Stockholders Equity"
+        shareholder_equity = balance_sheet.loc["Stockholders Equity"]
+        roe = net_income.iloc[0] / shareholder_equity.iloc[0]
 
-    # Drop rows with NaN values (due to the shift operation)
-    data = data.dropna()
+        metrics["roe"] = round(roe, 4)
 
-    # Selecting the features to normalize
-    features_to_normalize = [
-        "Close",
-        "50_MA",
-        "200_MA",
-        "Daily_Return",
-        "Volatility",
-        "RSI",
-    ]
+    except Exception as e:
+        metrics["roe"] = None
+        print(f"ROE Calculation Error: {e}")
 
-    # Initialize and apply StandardScaler
-    scaler = StandardScaler()
-    data[features_to_normalize] = scaler.fit_transform(data[features_to_normalize])
-
-    # Define features and target
-    X = data[features_to_normalize]
-    y = data["Success"]
-
-    # Split the data into training and testing sets
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-
-    # Train the Random Forest model
-    rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
-    rf_model.fit(X_train, y_train)
-
-    # Make predictions on the test set
-    y_pred = rf_model.predict(X_test)
-
-    # Evaluate the model
-    accuracy = accuracy_score(y_test, y_pred)
-    print(f"Accuracy for {ticker}: {accuracy:.2f}")
-
-    # Display classification report
-    print(
-        f"Classification Report for {ticker}:\n", classification_report(y_test, y_pred)
-    )
-
-    # Display confusion matrix
-    print(f"Confusion Matrix for {ticker}:\n", confusion_matrix(y_test, y_pred))
-
-    # Perform cross-validation
-    cv_scores = cross_val_score(rf_model, X, y, cv=5)
-    print(f"Cross-Validation Scores for {ticker}: {cv_scores}")
-    print(f"Mean CV Accuracy for {ticker}: {cv_scores.mean():.2f}")
-
-    # Get and display feature importances
-    feature_importances = pd.Series(
-        rf_model.feature_importances_, index=features_to_normalize
-    )
-    print(
-        f"Feature Importances for {ticker}:\n",
-        feature_importances.sort_values(ascending=False),
-    )
-
-    # Save the final prepared data
-    data.to_csv(f"{ticker}_prepared_data_with_success.csv")
+    return metrics
 
 
-# Example usage
-ticker = input("Enter the stock ticker symbol (e.g., AAPL, MSFT, TSLA): ")
-analyze_stock(ticker)
+def analyze_stock(ticker):
+    metrics = calculate_metrics(ticker)
+
+    print(f"\nFinancial Metrics for {ticker.upper()}:")
+    for key, value in metrics.items():
+        print(f"{key}: {value}")
+
+
+if __name__ == "__main__":
+    ticker = "AAPL"
+    analyze_stock(ticker)
